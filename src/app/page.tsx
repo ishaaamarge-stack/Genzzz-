@@ -52,7 +52,7 @@ const prompts = [
 
 const chats = ["New chat", "Design ideas", "Study notes", "Weekend plans"];
 
-const backgroundVideos = ["/bg.mp4", "/bg2.mp4"];
+const backgroundVideos = ["/bg2.mp4"];
 
 const authSlides = [
   {
