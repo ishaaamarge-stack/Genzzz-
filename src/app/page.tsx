@@ -1,6 +1,14 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile,
+} from "firebase/auth";
+import { firebaseAuth } from "@/lib/firebase";
 
 type Message = {
   id: number;
@@ -195,6 +203,26 @@ function buildUserContent(text: string, attachments: Attachment[]): ChatContent 
   return parts.length === 1 && attachments.length === 0 ? messageText : parts;
 }
 
+function getAuthErrorMessage(error: unknown) {
+  if (typeof error === "object" && error && "code" in error) {
+    const code = String(error.code);
+
+    if (code === "auth/invalid-credential") {
+      return "Email or password is incorrect.";
+    }
+
+    if (code === "auth/email-already-in-use") {
+      return "An account already exists for this email.";
+    }
+
+    if (code === "auth/weak-password") {
+      return "Password must be at least 6 characters.";
+    }
+  }
+
+  return "Could not sign in right now.";
+}
+
 export default function Home() {
   const nextMessageId = useRef(2);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -202,6 +230,9 @@ export default function Home() {
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [isAuthed, setIsAuthed] = useState(false);
   const [displayName, setDisplayName] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [messages, setMessages] = useState<Message[]>(starterMessages);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -219,6 +250,16 @@ export default function Home() {
   }, [messages]);
 
   useEffect(() => {
+    const unsubscribe = onAuthStateChanged(firebaseAuth, (user) => {
+      setIsAuthed(Boolean(user));
+      setDisplayName(user?.displayName || user?.email?.split("@")[0] || "");
+      setIsAuthLoading(false);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
     if (isAuthed) {
       return;
     }
@@ -230,16 +271,41 @@ export default function Home() {
     return () => window.clearInterval(slideTimer);
   }, [isAuthed]);
 
-  function handleAuth(event: FormEvent<HTMLFormElement>) {
+  async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setAuthError("");
+    setIsAuthSubmitting(true);
+
     const formData = new FormData(event.currentTarget);
+    const email = String(formData.get("email") || "").trim();
+    const password = String(formData.get("password") || "");
     const name =
       String(formData.get("name") || "").trim() ||
-      String(formData.get("email") || "User").split("@")[0] ||
+      email.split("@")[0] ||
       "User";
 
-    setDisplayName(name);
-    setIsAuthed(true);
+    try {
+      if (authMode === "signup") {
+        const credential = await createUserWithEmailAndPassword(
+          firebaseAuth,
+          email,
+          password,
+        );
+        await updateProfile(credential.user, { displayName: name });
+        setDisplayName(name);
+        return;
+      }
+
+      await signInWithEmailAndPassword(firebaseAuth, email, password);
+    } catch (error) {
+      setAuthError(getAuthErrorMessage(error));
+    } finally {
+      setIsAuthSubmitting(false);
+    }
+  }
+
+  async function handleLogout() {
+    await signOut(firebaseAuth);
   }
 
   async function handlePhotoChange(event: ChangeEvent<HTMLInputElement>) {
@@ -391,6 +457,24 @@ export default function Home() {
     sendMessage(input);
   }
 
+  if (isAuthLoading) {
+    return (
+      <main className="auth-shell">
+        <BackgroundVideo />
+        <section className="auth-panel" aria-label="Loading account">
+          <div className="auth-brand">
+            <span className="brand-mark">G</span>
+            <div>
+              <p className="eyebrow">Welcome to</p>
+              <h1>Genzzz!!</h1>
+            </div>
+          </div>
+          <p className="auth-message">Checking your account...</p>
+        </section>
+      </main>
+    );
+  }
+
   if (!isAuthed) {
     return (
       <main className="auth-shell">
@@ -437,14 +521,20 @@ export default function Home() {
               <button
                 type="button"
                 className={authMode === "login" ? "active" : ""}
-                onClick={() => setAuthMode("login")}
+                onClick={() => {
+                  setAuthMode("login");
+                  setAuthError("");
+                }}
               >
                 Login
               </button>
               <button
                 type="button"
                 className={authMode === "signup" ? "active" : ""}
-                onClick={() => setAuthMode("signup")}
+                onClick={() => {
+                  setAuthMode("signup");
+                  setAuthError("");
+                }}
               >
                 Signup
               </button>
@@ -467,11 +557,17 @@ export default function Home() {
                   name="password"
                   placeholder="Enter password"
                   required
+                  minLength={6}
                   type="password"
                 />
               </label>
-              <button type="submit">
-                {authMode === "login" ? "Login" : "Create account"}
+              {authError ? <p className="auth-error">{authError}</p> : null}
+              <button type="submit" disabled={isAuthSubmitting}>
+                {isAuthSubmitting
+                  ? "Please wait"
+                  : authMode === "login"
+                    ? "Login"
+                    : "Create account"}
               </button>
             </form>
           </section>
@@ -521,7 +617,7 @@ export default function Home() {
           <button
             className="mode-button"
             type="button"
-            onClick={() => setIsAuthed(false)}
+            onClick={handleLogout}
           >
             {displayName || "Account"}
           </button>

@@ -232,6 +232,27 @@ button:disabled {
   color: var(--ink);
 }
 
+.auth-message,
+.auth-error {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.auth-message {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.auth-error {
+  padding: 10px 12px;
+  border: 1px solid #f4b6b6;
+  border-radius: 8px;
+  background: #fff1f1;
+  color: #9b1c1c;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .app-shell {
   position: relative;
   isolation: isolate;
