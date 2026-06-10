@@ -60,6 +60,21 @@ const starterMessages: Message[] = [
   },
 ];
 
+function BackgroundVideo() {
+  return (
+    <video
+      className="background-video"
+      autoPlay
+      loop
+      muted
+      playsInline
+      aria-hidden="true"
+    >
+      <source src="/bg.mp4" type="video/mp4" />
+    </video>
+  );
+}
+
 function formatFileSize(size: number) {
   if (size < 1024) {
     return `${size} B`;
@@ -344,6 +359,7 @@ export default function Home() {
   if (!isAuthed) {
     return (
       <main className="auth-shell">
+        <BackgroundVideo />
         <section className="auth-panel" aria-label="Account access">
           <div className="auth-brand">
             <span className="brand-mark">G</span>
@@ -401,6 +417,7 @@ export default function Home() {
 
   return (
     <main className="app-shell">
+      <BackgroundVideo />
       <aside className="sidebar" aria-label="Chat history">
         <div className="brand">
           <span className="brand-mark">G</span>
