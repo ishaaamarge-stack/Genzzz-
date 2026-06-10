@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Message = {
   id: number;
@@ -52,6 +52,23 @@ const prompts = [
 
 const chats = ["New chat", "Design ideas", "Study notes", "Weekend plans"];
 
+const backgroundVideos = ["/bg.mp4", "/bg2.mp4"];
+
+const authSlides = [
+  {
+    title: "Chat in motion",
+    text: "A focused space for quick ideas, notes, files, photos, and answers.",
+  },
+  {
+    title: "Bring context",
+    text: "Attach what matters and keep the conversation moving without switching tools.",
+  },
+  {
+    title: "Stay in flow",
+    text: "Start fast, return to recent chats, and keep the workspace clean.",
+  },
+];
+
 const starterMessages: Message[] = [
   {
     id: 1,
@@ -60,18 +77,23 @@ const starterMessages: Message[] = [
   },
 ];
 
-function BackgroundVideo() {
+function BackgroundVideo({ activeIndex = 0 }: { activeIndex?: number }) {
   return (
-    <video
-      className="background-video"
-      autoPlay
-      loop
-      muted
-      playsInline
-      aria-hidden="true"
-    >
-      <source src="/bg.mp4" type="video/mp4" />
-    </video>
+    <>
+      {backgroundVideos.map((src, index) => (
+        <video
+          className={`background-video ${activeIndex === index ? "active" : ""}`}
+          autoPlay
+          loop
+          muted
+          playsInline
+          aria-hidden="true"
+          key={src}
+        >
+          <source src={src} type="video/mp4" />
+        </video>
+      ))}
+    </>
   );
 }
 
@@ -185,6 +207,7 @@ export default function Home() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [locationStatus, setLocationStatus] = useState("");
+  const [activeSlide, setActiveSlide] = useState(0);
 
   const currentChats = useMemo(() => {
     const latestUserMessages = messages
@@ -194,6 +217,18 @@ export default function Home() {
 
     return latestUserMessages.length > 0 ? ["New chat", ...latestUserMessages] : chats;
   }, [messages]);
+
+  useEffect(() => {
+    if (isAuthed) {
+      return;
+    }
+
+    const slideTimer = window.setInterval(() => {
+      setActiveSlide((current) => (current + 1) % authSlides.length);
+    }, 4200);
+
+    return () => window.clearInterval(slideTimer);
+  }, [isAuthed]);
 
   function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -359,58 +394,88 @@ export default function Home() {
   if (!isAuthed) {
     return (
       <main className="auth-shell">
-        <BackgroundVideo />
-        <section className="auth-panel" aria-label="Account access">
-          <div className="auth-brand">
-            <span className="brand-mark">G</span>
-            <div>
-              <p className="eyebrow">Welcome to</p>
-              <h1>Genzzz!!</h1>
+        <BackgroundVideo activeIndex={activeSlide % backgroundVideos.length} />
+        <div className="auth-layout">
+          <section className="auth-slide" aria-label="Genzzz highlights">
+            <div className="slide-track">
+              {authSlides.map((slide, index) => (
+                <article
+                  className={`slide ${activeSlide === index ? "active" : ""}`}
+                  key={slide.title}
+                  aria-hidden={activeSlide !== index}
+                >
+                  <p className="eyebrow">Genzzz!!</p>
+                  <h2>{slide.title}</h2>
+                  <p>{slide.text}</p>
+                </article>
+              ))}
             </div>
-          </div>
 
-          <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
-            <button
-              type="button"
-              className={authMode === "login" ? "active" : ""}
-              onClick={() => setAuthMode("login")}
-            >
-              Login
-            </button>
-            <button
-              type="button"
-              className={authMode === "signup" ? "active" : ""}
-              onClick={() => setAuthMode("signup")}
-            >
-              Signup
-            </button>
-          </div>
+            <div className="slide-dots" aria-label="Choose slide">
+              {authSlides.map((slide, index) => (
+                <button
+                  type="button"
+                  className={activeSlide === index ? "active" : ""}
+                  key={slide.title}
+                  aria-label={`Show ${slide.title}`}
+                  onClick={() => setActiveSlide(index)}
+                />
+              ))}
+            </div>
+          </section>
 
-          <form className="auth-form" onSubmit={handleAuth}>
-            {authMode === "signup" ? (
+          <section className="auth-panel" aria-label="Account access">
+            <div className="auth-brand">
+              <span className="brand-mark">G</span>
+              <div>
+                <p className="eyebrow">Welcome to</p>
+                <h1>Genzzz!!</h1>
+              </div>
+            </div>
+
+            <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
+              <button
+                type="button"
+                className={authMode === "login" ? "active" : ""}
+                onClick={() => setAuthMode("login")}
+              >
+                Login
+              </button>
+              <button
+                type="button"
+                className={authMode === "signup" ? "active" : ""}
+                onClick={() => setAuthMode("signup")}
+              >
+                Signup
+              </button>
+            </div>
+
+            <form className="auth-form" onSubmit={handleAuth}>
+              {authMode === "signup" ? (
+                <label>
+                  Name
+                  <input name="name" placeholder="Your name" type="text" />
+                </label>
+              ) : null}
               <label>
-                Name
-                <input name="name" placeholder="Your name" type="text" />
+                Email
+                <input name="email" placeholder="you@example.com" required type="email" />
               </label>
-            ) : null}
-            <label>
-              Email
-              <input name="email" placeholder="you@example.com" required type="email" />
-            </label>
-            <label>
-              Password
-              <input
-                name="password"
-                placeholder="Enter password"
-                required
-                type="password"
-              />
-            </label>
-            <button type="submit">
-              {authMode === "login" ? "Login" : "Create account"}
-            </button>
-          </form>
-        </section>
+              <label>
+                Password
+                <input
+                  name="password"
+                  placeholder="Enter password"
+                  required
+                  type="password"
+                />
+              </label>
+              <button type="submit">
+                {authMode === "login" ? "Login" : "Create account"}
+              </button>
+            </form>
+          </section>
+        </div>
       </main>
     );
   }

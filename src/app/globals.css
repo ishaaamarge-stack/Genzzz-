@@ -46,6 +46,12 @@ button:disabled {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  opacity: 0;
+  transition: opacity 700ms ease;
+}
+
+.background-video.active {
+  opacity: 1;
 }
 
 .auth-shell::before,
@@ -70,10 +76,98 @@ button:disabled {
   background: transparent;
 }
 
+.auth-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 520px) minmax(360px, 440px);
+  gap: 28px;
+  align-items: stretch;
+  width: min(1000px, 100%);
+}
+
+.auth-slide {
+  position: relative;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-height: 420px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(7, 26, 61, 0.58);
+  color: var(--white);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.24);
+}
+
+.slide-track {
+  position: relative;
+  min-height: 0;
+}
+
+.slide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: end;
+  gap: 14px;
+  padding: 34px;
+  opacity: 0;
+  transform: translateX(36px);
+  transition:
+    opacity 420ms ease,
+    transform 420ms ease;
+}
+
+.slide.active {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.slide .eyebrow {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.slide h2 {
+  margin: 0;
+  max-width: 10ch;
+  color: var(--white);
+  font-size: 54px;
+  line-height: 0.95;
+  letter-spacing: 0;
+}
+
+.slide p {
+  max-width: 34ch;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+.slide-dots {
+  z-index: 1;
+  display: flex;
+  gap: 9px;
+  padding: 0 34px 34px;
+}
+
+.slide-dots button {
+  width: 32px;
+  height: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.38);
+  cursor: pointer;
+}
+
+.slide-dots button.active {
+  background: var(--white);
+}
+
 .auth-panel {
   display: grid;
   gap: 24px;
-  width: min(440px, 100%);
+  width: 100%;
   padding: 28px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.92);
@@ -415,6 +509,36 @@ h1 {
 }
 
 @media (max-width: 760px) {
+  .auth-shell {
+    place-items: start center;
+  }
+
+  .auth-layout {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .auth-slide {
+    min-height: 240px;
+  }
+
+  .slide {
+    padding: 24px;
+  }
+
+  .slide h2 {
+    max-width: 12ch;
+    font-size: 38px;
+  }
+
+  .slide p {
+    font-size: 15px;
+  }
+
+  .slide-dots {
+    padding: 0 24px 24px;
+  }
+
   .app-shell {
     grid-template-columns: 1fr;
   }
