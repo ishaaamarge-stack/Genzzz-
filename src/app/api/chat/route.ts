@@ -39,11 +39,21 @@ export async function POST(request: Request) {
   if (!endpoint || !apiKey) {
     return NextResponse.json(
       { error: "Azure OpenAI environment variables are not configured." },
-      { status: 500 },
+      { status: 503 },
     );
   }
 
-  const body = (await request.json()) as { messages?: ChatMessage[] };
+  let body: { messages?: ChatMessage[] };
+
+  try {
+    body = (await request.json()) as { messages?: ChatMessage[] };
+  } catch {
+    return NextResponse.json(
+      { error: "Request body must be valid JSON." },
+      { status: 400 },
+    );
+  }
+
   const messages = body.messages?.filter(
     (message) =>
       ["assistant", "user", "system"].includes(message.role) &&
@@ -57,25 +67,34 @@ export async function POST(request: Request) {
     );
   }
 
-  const azureResponse = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "api-key": apiKey,
-    },
-    body: JSON.stringify({
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are Genzzz!!, a helpful AI assistant. Reply in compact Markdown only. Put the main answer first and make it bold. Use at most one short follow-up line or a tiny bullet list if absolutely needed. No extra explanation, no filler, no preamble.",
-        },
-        ...messages,
-      ],
-      temperature: 0.2,
-      max_tokens: 350,
-    }),
-  });
+  let azureResponse: Response;
+
+  try {
+    azureResponse = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": apiKey,
+      },
+      body: JSON.stringify({
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are Genzzz!!, a helpful AI assistant. Reply in compact Markdown only. Put the main answer first and make it bold. Use at most one short follow-up line or a tiny bullet list if absolutely needed. No extra explanation, no filler, no preamble.",
+          },
+          ...messages,
+        ],
+        temperature: 0.2,
+        max_tokens: 350,
+      }),
+    });
+  } catch {
+    return NextResponse.json(
+      { error: "Could not reach Azure OpenAI. Check the endpoint URL." },
+      { status: 502 },
+    );
+  }
 
   if (!azureResponse.ok) {
     const errorText = await azureResponse.text();

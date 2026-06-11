@@ -1,6 +1,14 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  RefObject,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -25,19 +33,13 @@ type PhotoAttachment = {
 };
 
 type FileAttachment = {
-  kind: "file";
+  kind: "video" | "file" | "document";
   name: string;
   size: number;
   content?: string;
 };
 
-type LocationAttachment = {
-  kind: "location";
-  latitude: number;
-  longitude: number;
-};
-
-type Attachment = PhotoAttachment | FileAttachment | LocationAttachment;
+type Attachment = PhotoAttachment | FileAttachment;
 
 type ChatContent =
   | string
@@ -57,6 +59,12 @@ const prompts = [
   "Explain this photo",
   "Summarize this file",
 ];
+
+const uploadLabels: Record<FileAttachment["kind"], string> = {
+  video: "Video",
+  file: "File",
+  document: "Document",
+};
 
 const chats = ["New chat", "Design ideas", "Study notes", "Weekend plans"];
 
@@ -81,7 +89,7 @@ const starterMessages: Message[] = [
   {
     id: 1,
     role: "assistant",
-    text: "Hi, I am Genzzz!! Ask me anything, upload a photo or file, or share your location.",
+    text: "Hi, I am Genzzz!! Ask me anything, upload a photo, video, file, or document.",
   },
 ];
 
@@ -138,17 +146,27 @@ function readFileAsText(file: File) {
 function attachmentSummary(attachments: Attachment[]) {
   return attachments
     .map((attachment) => {
-      if (attachment.kind === "photo") {
-        return `Photo: ${attachment.name}`;
+      switch (attachment.kind) {
+        case "photo":
+          return `Photo: ${attachment.name}`;
+        case "file":
+        case "video":
+        case "document":
+          return `${uploadLabels[attachment.kind]}: ${attachment.name} (${formatFileSize(attachment.size)})`;
       }
-
-      if (attachment.kind === "file") {
-        return `File: ${attachment.name} (${formatFileSize(attachment.size)})`;
-      }
-
-      return `Location: ${attachment.latitude.toFixed(5)}, ${attachment.longitude.toFixed(5)}`;
     })
     .join("\n");
+}
+
+function attachmentDisplayLabel(attachment: Attachment) {
+  switch (attachment.kind) {
+    case "photo":
+      return `Photo: ${attachment.name}`;
+    case "file":
+    case "video":
+    case "document":
+      return `${uploadLabels[attachment.kind]}: ${attachment.name}`;
+  }
 }
 
 function renderFormattedText(text: string) {
@@ -177,21 +195,23 @@ function buildUserContent(text: string, attachments: Attachment[]): ChatContent 
   > = [];
   const details = attachments
     .map((attachment) => {
-      if (attachment.kind === "photo") {
-        parts.push({ type: "image_url", image_url: { url: attachment.dataUrl } });
-        return `The user attached an image named ${attachment.name}.`;
-      }
+      switch (attachment.kind) {
+        case "photo":
+          parts.push({ type: "image_url", image_url: { url: attachment.dataUrl } });
+          return `The user attached an image named ${attachment.name}.`;
+        case "file":
+        case "video":
+        case "document": {
+          const label = uploadLabels[attachment.kind];
 
-      if (attachment.kind === "file") {
-        return [
-          `The user attached a file named ${attachment.name}.`,
-          attachment.content
-            ? `File text preview:\n${attachment.content}`
+          return [
+            `The user attached a ${label.toLowerCase()} named ${attachment.name}.`,
+            attachment.content
+              ? `File text preview:\n${attachment.content}`
             : "No readable text preview was available for this file.",
-        ].join("\n");
+          ].join("\n");
+        }
       }
-
-      return `The user shared this location: latitude ${attachment.latitude}, longitude ${attachment.longitude}.`;
     })
     .join("\n\n");
   const messageText = [text || "Please review the attached item.", details]
@@ -226,7 +246,9 @@ function getAuthErrorMessage(error: unknown) {
 export default function Home() {
   const nextMessageId = useRef(2);
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [isAuthed, setIsAuthed] = useState(false);
   const [displayName, setDisplayName] = useState("");
@@ -237,7 +259,15 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isSending, setIsSending] = useState(false);
-  const [locationStatus, setLocationStatus] = useState("");
+  const [isImageGenerating, setIsImageGenerating] = useState(false);
+  const [isVideoGenerating, setIsVideoGenerating] = useState(false);
+  const [generatedImageUrl, setGeneratedImageUrl] = useState("");
+  const [generatedImagePrompt, setGeneratedImagePrompt] = useState("");
+  const [generatedVideoUrl, setGeneratedVideoUrl] = useState("");
+  const [generatedVideoPrompt, setGeneratedVideoPrompt] = useState("");
+  const [imageError, setImageError] = useState("");
+  const [videoError, setVideoError] = useState("");
+  const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false);
   const [activeSlide, setActiveSlide] = useState(0);
 
   const currentChats = useMemo(() => {
@@ -323,7 +353,10 @@ export default function Home() {
     event.target.value = "";
   }
 
-  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(
+    event: ChangeEvent<HTMLInputElement>,
+    kind: FileAttachment["kind"],
+  ) {
     const file = event.target.files?.[0];
 
     if (!file) {
@@ -339,34 +372,15 @@ export default function Home() {
     const content = isReadable ? await readFileAsText(file) : undefined;
 
     setAttachments((current) => [
-      ...current.filter((attachment) => attachment.kind !== "file"),
-      { kind: "file", name: file.name, size: file.size, content },
+      ...current.filter((attachment) => attachment.kind !== kind),
+      { kind, name: file.name, size: file.size, content },
     ]);
     event.target.value = "";
   }
 
-  function handleLocation() {
-    if (!navigator.geolocation) {
-      setLocationStatus("Location is not supported in this browser.");
-      return;
-    }
-
-    setLocationStatus("Getting location...");
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setAttachments((current) => [
-          ...current.filter((attachment) => attachment.kind !== "location"),
-          {
-            kind: "location",
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-          },
-        ]);
-        setLocationStatus("Location attached.");
-      },
-      () => setLocationStatus("Location permission was denied."),
-      { enableHighAccuracy: true, timeout: 10000 },
-    );
+  function openUploadPicker(inputRef: RefObject<HTMLInputElement | null>) {
+    setIsAttachMenuOpen(false);
+    inputRef.current?.click();
   }
 
   async function sendMessage(text: string) {
@@ -400,7 +414,6 @@ export default function Home() {
     setMessages([...nextMessages, thinkingMessage]);
     setInput("");
     setAttachments([]);
-    setLocationStatus("");
     setIsSending(true);
 
     try {
@@ -449,6 +462,84 @@ export default function Home() {
       ]);
     } finally {
       setIsSending(false);
+    }
+  }
+
+  async function generateImage() {
+    const prompt = input.trim();
+
+    if (!prompt || isImageGenerating) {
+      return;
+    }
+
+    setImageError("");
+    setGeneratedImageUrl("");
+    setGeneratedImagePrompt(prompt);
+    setIsImageGenerating(true);
+
+    try {
+      const response = await fetch("/api/image", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Genzzz could not generate an image right now.");
+      }
+
+      setGeneratedImageUrl(data.imageUrl);
+      setGeneratedImagePrompt(data.revisedPrompt || prompt);
+    } catch (error) {
+      setImageError(
+        error instanceof Error
+          ? error.message
+          : "Genzzz could not generate an image right now.",
+      );
+    } finally {
+      setIsImageGenerating(false);
+    }
+  }
+
+  async function generateVideo() {
+    const prompt = input.trim();
+
+    if (!prompt || isVideoGenerating) {
+      return;
+    }
+
+    setVideoError("");
+    setGeneratedVideoUrl("");
+    setGeneratedVideoPrompt(prompt);
+    setIsVideoGenerating(true);
+
+    try {
+      const response = await fetch("/api/video", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Genzzz could not generate a video right now.");
+      }
+
+      setGeneratedVideoUrl(data.videoUrl);
+      setGeneratedVideoPrompt(data.prompt || prompt);
+    } catch (error) {
+      setVideoError(
+        error instanceof Error
+          ? error.message
+          : "Genzzz could not generate a video right now.",
+      );
+    } finally {
+      setIsVideoGenerating(false);
     }
   }
 
@@ -594,14 +685,20 @@ export default function Home() {
             setInput("");
             setAttachments([]);
             setIsSending(false);
+            setImageError("");
+            setVideoError("");
+            setGeneratedImageUrl("");
+            setGeneratedImagePrompt("");
+            setGeneratedVideoUrl("");
+            setGeneratedVideoPrompt("");
           }}
         >
           + New chat
         </button>
 
         <nav className="chat-list" aria-label="Recent chats">
-          {currentChats.map((chat) => (
-            <a href="#" key={chat}>
+          {currentChats.map((chat, index) => (
+            <a href="#" key={`${index}-${chat}`}>
               {chat}
             </a>
           ))}
@@ -663,50 +760,88 @@ export default function Home() {
             className="hidden-input"
             aria-label="Upload file"
             type="file"
-            onChange={handleFileChange}
+            onChange={(event) => handleFileChange(event, "file")}
+          />
+          <input
+            ref={videoInputRef}
+            className="hidden-input"
+            accept="video/*"
+            aria-label="Upload video"
+            type="file"
+            onChange={(event) => handleFileChange(event, "video")}
+          />
+          <input
+            ref={documentInputRef}
+            className="hidden-input"
+            accept=".txt,.md,.csv,.json,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            aria-label="Upload document"
+            type="file"
+            onChange={(event) => handleFileChange(event, "document")}
           />
 
           <div className="composer-tools" aria-label="Chat tools">
-            <button
-              type="button"
-              onClick={() => photoInputRef.current?.click()}
-              disabled={isSending}
-            >
-              Photo
-            </button>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isSending}
-            >
-              File
-            </button>
-            <button type="button" onClick={handleLocation} disabled={isSending}>
-              Location
-            </button>
+            <div className="attach-menu">
+              <button
+                className="plus-button"
+                type="button"
+                aria-label="Add attachment"
+                aria-expanded={isAttachMenuOpen}
+                aria-haspopup="menu"
+                onClick={() => setIsAttachMenuOpen((current) => !current)}
+                disabled={isSending}
+              >
+                +
+              </button>
+              {isAttachMenuOpen ? (
+                <div className="attach-dropdown" role="menu" aria-label="Attachment options">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openUploadPicker(photoInputRef)}
+                  >
+                    Photos
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openUploadPicker(videoInputRef)}
+                  >
+                    Videos
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openUploadPicker(fileInputRef)}
+                  >
+                    Files
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openUploadPicker(documentInputRef)}
+                  >
+                    Documents
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
 
-          {attachments.length > 0 || locationStatus ? (
+          {attachments.length > 0 ? (
             <div className="attachment-tray" aria-label="Attached items">
               {attachments.map((attachment) => (
                 <span
                   className="attachment-pill"
-                  key={
-                    attachment.kind === "location"
-                      ? "location"
-                      : `${attachment.kind}-${attachment.name}`
-                  }
+                  key={`${attachment.kind}-${attachment.name}`}
                 >
-                  {attachment.kind === "photo"
-                    ? `Photo: ${attachment.name}`
-                    : attachment.kind === "file"
-                      ? `File: ${attachment.name}`
-                      : `Location: ${attachment.latitude.toFixed(3)}, ${attachment.longitude.toFixed(3)}`}
+                  {attachmentDisplayLabel(attachment)}
                 </span>
               ))}
-              {locationStatus ? <span className="status-text">{locationStatus}</span> : null}
             </div>
           ) : null}
+
+          {imageError ? <p className="generation-error">{imageError}</p> : null}
+          {videoError ? <p className="generation-error">{videoError}</p> : null}
 
           <div className="message-row">
             <input
@@ -716,12 +851,87 @@ export default function Home() {
               value={input}
               onChange={(event) => setInput(event.target.value)}
             />
+            <button
+              className="image-generate-button"
+              type="button"
+              onClick={generateImage}
+              disabled={isImageGenerating || !input.trim()}
+            >
+              {isImageGenerating ? "Making" : "Image"}
+            </button>
+            <button
+              className="video-generate-button"
+              type="button"
+              onClick={generateVideo}
+              disabled={isVideoGenerating || !input.trim()}
+            >
+              {isVideoGenerating ? "Making" : "Video"}
+            </button>
             <button type="submit" disabled={isSending}>
               {isSending ? "Sending" : "Send"}
             </button>
           </div>
         </form>
       </section>
+
+      {generatedImageUrl ? (
+        <div className="image-modal-backdrop" role="presentation">
+          <section
+            className="image-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Generated image"
+          >
+            <div className="image-modal-header">
+              <div>
+                <p className="eyebrow">Generated image</p>
+                <h2>Preview</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close image preview"
+                onClick={() => setGeneratedImageUrl("")}
+              >
+                x
+              </button>
+            </div>
+            <div
+              className="image-preview"
+              role="img"
+              aria-label={generatedImagePrompt}
+              style={{ backgroundImage: `url(${JSON.stringify(generatedImageUrl)})` }}
+            />
+            <p>{generatedImagePrompt}</p>
+          </section>
+        </div>
+      ) : null}
+
+      {generatedVideoUrl ? (
+        <div className="image-modal-backdrop" role="presentation">
+          <section
+            className="image-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Generated video"
+          >
+            <div className="image-modal-header">
+              <div>
+                <p className="eyebrow">Generated video</p>
+                <h2>Preview</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close video preview"
+                onClick={() => setGeneratedVideoUrl("")}
+              >
+                x
+              </button>
+            </div>
+            <video className="video-preview" controls src={generatedVideoUrl} />
+            <p>{generatedVideoPrompt}</p>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
