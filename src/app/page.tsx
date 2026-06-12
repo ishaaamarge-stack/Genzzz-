@@ -5,7 +5,6 @@ import {
   FormEvent,
   RefObject,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -53,6 +52,23 @@ type ChatPayloadMessage = {
   content: ChatContent;
 };
 
+type ChatSession = {
+  id: string;
+  title: string;
+  messages: Message[];
+  updatedAt: number;
+};
+
+type NewsArticle = {
+  id: string;
+  title: string;
+  link: string;
+  source: string;
+  publishedAt: string;
+  imageUrl: string;
+  description: string;
+};
+
 const prompts = [
   "Plan my week",
   "Rewrite this caption",
@@ -66,9 +82,8 @@ const uploadLabels: Record<FileAttachment["kind"], string> = {
   document: "Document",
 };
 
-const chats = ["New chat", "Design ideas", "Study notes", "Weekend plans"];
-
 const backgroundVideos = ["/bg2.mp4"];
+const CHAT_HISTORY_KEY = "genzzz-chat-history";
 
 const authSlides = [
   {
@@ -92,6 +107,61 @@ const starterMessages: Message[] = [
     text: "Hi, I am Genzzz!! Ask me anything, upload a photo, video, file, or document.",
   },
 ];
+
+function createChatId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getChatTitle(messages: Message[]) {
+  const firstUserMessage = messages.find((message) => message.role === "user");
+  const title = firstUserMessage?.text.split("\n")[0].trim();
+
+  return title ? title.slice(0, 54) : "New chat";
+}
+
+function getNextMessageId(messages: Message[]) {
+  return Math.max(...messages.map((message) => message.id), 0) + 1;
+}
+
+function createChatSession(messages: Message[] = starterMessages): ChatSession {
+  return {
+    id: createChatId(),
+    title: getChatTitle(messages),
+    messages,
+    updatedAt: Date.now(),
+  };
+}
+
+function loadStoredChatSessions() {
+  let storedSessions: ChatSession[] = [];
+
+  try {
+    const storedHistory = window.localStorage.getItem(CHAT_HISTORY_KEY);
+    const parsedHistory = storedHistory ? JSON.parse(storedHistory) : [];
+
+    if (Array.isArray(parsedHistory)) {
+      storedSessions = parsedHistory
+        .filter(
+          (session): session is ChatSession =>
+            typeof session?.id === "string" &&
+            Array.isArray(session.messages),
+        )
+        .map((session) => ({
+          ...session,
+          title: session.title || getChatTitle(session.messages),
+          updatedAt: session.updatedAt || Date.now(),
+        }));
+    }
+  } catch {
+    storedSessions = [];
+  }
+
+  return storedSessions.length > 0 ? storedSessions : [createChatSession()];
+}
 
 function BackgroundVideo({ activeIndex = 0 }: { activeIndex?: number }) {
   return (
@@ -188,6 +258,23 @@ function renderFormattedText(text: string) {
   });
 }
 
+function formatNewsDate(value: string) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
 function buildUserContent(text: string, attachments: Attachment[]): ChatContent {
   const parts: Array<
     | { type: "text"; text: string }
@@ -255,6 +342,10 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [currentChatId, setCurrentChatId] = useState("");
+  const [hasLoadedChatHistory, setHasLoadedChatHistory] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>(starterMessages);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -267,22 +358,47 @@ export default function Home() {
   const [generatedVideoPrompt, setGeneratedVideoPrompt] = useState("");
   const [imageError, setImageError] = useState("");
   const [videoError, setVideoError] = useState("");
+  const [newsArticles, setNewsArticles] = useState<NewsArticle[]>([]);
+  const [isNewsLoading, setIsNewsLoading] = useState(false);
+  const [newsError, setNewsError] = useState("");
   const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false);
   const [activeSlide, setActiveSlide] = useState(0);
 
-  const currentChats = useMemo(() => {
-    const latestUserMessages = messages
-      .filter((message) => message.role === "user")
-      .slice(-3)
-      .map((message) => message.text.split("\n")[0]);
+  function enterChat(displayLabel: string) {
+    const nextSessions = loadStoredChatSessions();
+    const activeSession = nextSessions[0];
 
-    return latestUserMessages.length > 0 ? ["New chat", ...latestUserMessages] : chats;
-  }, [messages]);
+    setIsAuthed(true);
+    setDisplayName(displayLabel);
+    setIsSidebarOpen(false);
+    setNewsError("");
+    setChatSessions(nextSessions);
+    setCurrentChatId(activeSession.id);
+    setMessages(activeSession.messages);
+    nextMessageId.current = getNextMessageId(activeSession.messages);
+    setHasLoadedChatHistory(true);
+  }
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, (user) => {
-      setIsAuthed(Boolean(user));
-      setDisplayName(user?.displayName || user?.email?.split("@")[0] || "");
+      const isSignedIn = Boolean(user);
+
+      if (isSignedIn) {
+        enterChat(user?.displayName || user?.email?.split("@")[0] || "");
+      } else {
+        setIsAuthed(false);
+        setDisplayName("");
+        setIsSidebarOpen(false);
+        setNewsArticles([]);
+        setNewsError("");
+        setIsNewsLoading(false);
+        setChatSessions([]);
+        setCurrentChatId("");
+        setHasLoadedChatHistory(false);
+        setMessages(starterMessages);
+        nextMessageId.current = 2;
+      }
+
       setIsAuthLoading(false);
     });
 
@@ -299,6 +415,56 @@ export default function Home() {
     }, 4200);
 
     return () => window.clearInterval(slideTimer);
+  }, [isAuthed]);
+
+  useEffect(() => {
+    if (!isAuthed || !hasLoadedChatHistory) {
+      return;
+    }
+
+    window.localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(chatSessions));
+  }, [chatSessions, hasLoadedChatHistory, isAuthed]);
+
+  useEffect(() => {
+    if (!isAuthed) {
+      return;
+    }
+
+    let isMounted = true;
+
+    async function loadNews() {
+      setIsNewsLoading(true);
+      setNewsError("");
+
+      try {
+        const response = await fetch("/api/news");
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "Could not load top news.");
+        }
+
+        if (isMounted) {
+          setNewsArticles(data.articles || []);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setNewsError(
+            error instanceof Error ? error.message : "Could not load top news.",
+          );
+        }
+      } finally {
+        if (isMounted) {
+          setIsNewsLoading(false);
+        }
+      }
+    }
+
+    loadNews();
+
+    return () => {
+      isMounted = false;
+    };
   }, [isAuthed]);
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
@@ -334,8 +500,75 @@ export default function Home() {
     }
   }
 
+  function handleSkipAuth() {
+    setAuthError("");
+    enterChat("Guest");
+  }
+
   async function handleLogout() {
+    setIsSidebarOpen(false);
     await signOut(firebaseAuth);
+  }
+
+  function clearTransientChatState() {
+    setInput("");
+    setAttachments([]);
+    setIsSending(false);
+    setImageError("");
+    setVideoError("");
+    setGeneratedImageUrl("");
+    setGeneratedImagePrompt("");
+    setGeneratedVideoUrl("");
+    setGeneratedVideoPrompt("");
+  }
+
+  function updateActiveMessages(nextMessages: Message[]) {
+    setMessages(nextMessages);
+
+    if (!currentChatId) {
+      return;
+    }
+
+    setChatSessions((currentSessions) => {
+      const activeSession = currentSessions.find(
+        (session) => session.id === currentChatId,
+      );
+      const updatedSession: ChatSession = {
+        id: currentChatId,
+        title: getChatTitle(nextMessages),
+        messages: nextMessages,
+        updatedAt: Date.now(),
+        ...activeSession,
+      };
+
+      updatedSession.title = getChatTitle(nextMessages);
+      updatedSession.messages = nextMessages;
+      updatedSession.updatedAt = Date.now();
+
+      return [
+        updatedSession,
+        ...currentSessions.filter((session) => session.id !== currentChatId),
+      ].slice(0, 30);
+    });
+  }
+
+  function handleNewChat() {
+    const newSession = createChatSession();
+
+    nextMessageId.current = 2;
+    setChatSessions((currentSessions) => [newSession, ...currentSessions]);
+    setCurrentChatId(newSession.id);
+    setMessages(starterMessages);
+    clearTransientChatState();
+    setIsSidebarOpen(false);
+  }
+
+  function handleSelectChat(session: ChatSession) {
+    nextMessageId.current = getNextMessageId(session.messages);
+    setCurrentChatId(session.id);
+    setMessages(session.messages);
+    clearTransientChatState();
+    setIsSidebarOpen(false);
   }
 
   async function handlePhotoChange(event: ChangeEvent<HTMLInputElement>) {
@@ -411,7 +644,7 @@ export default function Home() {
 
     const nextMessages = [...messages, userMessage];
 
-    setMessages([...nextMessages, thinkingMessage]);
+    updateActiveMessages([...nextMessages, thinkingMessage]);
     setInput("");
     setAttachments([]);
     setIsSending(true);
@@ -440,7 +673,7 @@ export default function Home() {
         throw new Error(data.error || "Genzzz could not answer right now.");
       }
 
-      setMessages([
+      updateActiveMessages([
         ...nextMessages,
         {
           id: thinkingMessage.id,
@@ -449,7 +682,7 @@ export default function Home() {
         },
       ]);
     } catch (error) {
-      setMessages([
+      updateActiveMessages([
         ...nextMessages,
         {
           id: thinkingMessage.id,
@@ -656,11 +889,20 @@ export default function Home() {
               <button type="submit" disabled={isAuthSubmitting}>
                 {isAuthSubmitting
                   ? "Please wait"
-                  : authMode === "login"
+                : authMode === "login"
                     ? "Login"
                     : "Create account"}
               </button>
             </form>
+
+            <button
+              className="skip-auth"
+              type="button"
+              onClick={handleSkipAuth}
+              disabled={isAuthSubmitting}
+            >
+              Skip for now
+            </button>
           </section>
         </div>
       </main>
@@ -669,47 +911,73 @@ export default function Home() {
 
   return (
     <main className="app-shell">
-      <BackgroundVideo />
-      <aside className="sidebar" aria-label="Chat history">
-        <div className="brand">
-          <span className="brand-mark">G</span>
-          <span>Genzzz!!</span>
+      <aside
+        className={`sidebar ${isSidebarOpen ? "open" : ""}`}
+        aria-label="Chat history"
+      >
+        <div className="sidebar-head">
+          <div className="brand">
+            <span className="brand-mark">G</span>
+            <span>Genzzz!!</span>
+          </div>
+          <button
+            className="sidebar-close"
+            type="button"
+            aria-label="Close chat history"
+            onClick={() => setIsSidebarOpen(false)}
+          >
+            x
+          </button>
         </div>
 
         <button
           className="new-chat"
           type="button"
-          onClick={() => {
-            nextMessageId.current = 2;
-            setMessages(starterMessages);
-            setInput("");
-            setAttachments([]);
-            setIsSending(false);
-            setImageError("");
-            setVideoError("");
-            setGeneratedImageUrl("");
-            setGeneratedImagePrompt("");
-            setGeneratedVideoUrl("");
-            setGeneratedVideoPrompt("");
-          }}
+          onClick={handleNewChat}
         >
           + New chat
         </button>
 
         <nav className="chat-list" aria-label="Recent chats">
-          {currentChats.map((chat, index) => (
-            <a href="#" key={`${index}-${chat}`}>
-              {chat}
-            </a>
+          {chatSessions.map((session) => (
+            <button
+              className={session.id === currentChatId ? "active" : ""}
+              type="button"
+              key={session.id}
+              onClick={() => handleSelectChat(session)}
+            >
+              {session.title}
+            </button>
           ))}
         </nav>
       </aside>
+      {isSidebarOpen ? (
+        <button
+          className="sidebar-backdrop"
+          type="button"
+          aria-label="Close chat history"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      ) : null}
 
       <section className="chat-panel" aria-label="Genzzz chat">
         <header className="topbar">
-          <div>
-            <p className="eyebrow">AI assistant</p>
-            <h1>Genzzz!!</h1>
+          <div className="topbar-title">
+            <button
+              className="sidebar-toggle"
+              type="button"
+              aria-label="Open chat history"
+              aria-expanded={isSidebarOpen}
+              onClick={() => setIsSidebarOpen(true)}
+            >
+              <span />
+              <span />
+              <span />
+            </button>
+            <div>
+              <p className="eyebrow">AI assistant</p>
+              <h1>Genzzz!!</h1>
+            </div>
           </div>
           <button
             className="mode-button"
@@ -873,6 +1141,53 @@ export default function Home() {
           </div>
         </form>
       </section>
+
+      <aside className="news-panel" aria-label="Top news and stories">
+        <section className="news-section">
+          <div className="news-header">
+            <div>
+              <p className="eyebrow">Top news</p>
+              <h2>News and stories</h2>
+            </div>
+            {isNewsLoading ? <span>Loading</span> : null}
+          </div>
+
+          {newsError ? <p className="news-error">{newsError}</p> : null}
+
+          <div className="news-grid">
+            {newsArticles.map((article) => (
+              <a
+                className="news-card"
+                href={article.link || "#"}
+                target={article.link ? "_blank" : undefined}
+                rel={article.link ? "noreferrer" : undefined}
+                key={article.id}
+              >
+                {article.imageUrl ? (
+                  <span
+                    className="news-image"
+                    role="img"
+                    aria-label={article.title}
+                    style={{
+                      backgroundImage: `url(${JSON.stringify(article.imageUrl)})`,
+                    }}
+                  />
+                ) : (
+                  <span className="news-image empty" />
+                )}
+                <span className="news-meta">
+                  {article.source}
+                  {formatNewsDate(article.publishedAt)
+                    ? ` - ${formatNewsDate(article.publishedAt)}`
+                    : ""}
+                </span>
+                <strong>{article.title}</strong>
+                {article.description ? <span>{article.description}</span> : null}
+              </a>
+            ))}
+          </div>
+        </section>
+      </aside>
 
       {generatedImageUrl ? (
         <div className="image-modal-backdrop" role="presentation">
